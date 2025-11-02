@@ -11,7 +11,7 @@ DATA_FILES = {
     "Sherwin": "sherwin_data.json"
 }
 
-# === MOTIVATIONAL QUOTES ===
+# === QUOTES ===
 QUOTES = [
     {"quote": "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", "author": "Aristotle"},
     {"quote": "Discipline is the bridge between goals and accomplishment.", "author": "Jim Rohn"},
@@ -25,25 +25,32 @@ QUOTES = [
     {"quote": "Mastery is time and intense focus.", "author": "Robert Greene"},
 ]
 
-# === DATA HANDLING ===
+# === DATA HANDLING (FIXED: Safe defaults) ===
 def load_user_data(username: str) -> Dict[str, Any]:
     try:
         with open(DATA_FILES[username], "r") as f:
-            return json.load(f)
+            data = json.load(f)
     except:
-        return {
-            "habits": [],
-            "tasks": [],
-            "wake_up": "6:00 AM",
-            "bed_time": "11:00 PM",
-            "current_day": datetime.date.today().isoformat(),
-            "checkins": {},
-            "journal_entries": [],
-            "gratitude": [],
-            "streaks": {"habits": 0, "tasks": 0},
-            "quote_index": 0,
-            "daily_schedule": {}
-        }
+        data = {}
+    
+    # Ensure all keys exist
+    defaults = {
+        "habits": [],
+        "tasks": [],
+        "wake_up": "6:00 AM",
+        "bed_time": "11:00 PM",
+        "current_day": datetime.date.today().isoformat(),
+        "checkins": {},
+        "journal_entries": [],
+        "gratitude": [],
+        "streaks": {"habits": 0, "tasks": 0},
+        "quote_index": 0,
+        "daily_schedule": {}  # Critical: now always exists
+    }
+    for key, value in defaults.items():
+        if key not in data:
+            data[key] = value
+    return data
 
 def save_user_data(username: str, data: Dict[str, Any]):
     with open(DATA_FILES[username], "w") as f:
@@ -66,7 +73,7 @@ if data["current_day"] != current_day:
     data["daily_schedule"] = {}
     save_user_data(user, data)
 
-# === FIXED: 6:00 AM – 11:00 PM HOURS ===
+# === HOURS: 6:00 AM – 11:00 PM (FIXED) ===
 hours = []
 for h in range(6, 24):
     if h == 12:
@@ -76,15 +83,13 @@ for h in range(6, 24):
     else:
         hours.append(f"{h:02d}:00 AM")
 
-# Auto-schedule tasks
+# Auto-schedule tasks (only if not done today)
 if data["tasks"] and not data["daily_schedule"]:
     priority_tasks = sorted(data["tasks"], key=lambda t: t.get("priority", 3))
     for i, task in enumerate(priority_tasks):
         if i < len(hours):
             hour = hours[i]
-            if hour not in data["daily_schedule"]:
-                data["daily_schedule"][hour] = []
-            data["daily_schedule"][hour].append(task["name"])
+            data["daily_schedule"][hour] = data["daily_schedule"].get(hour, []) + [task["name"]]
     save_user_data(user, data)
 
 # === TABS ===
@@ -119,17 +124,20 @@ with tab1:
         for i, t in enumerate(data["tasks"]):
             col1, col2, col3 = st.columns([3,1,1])
             with col1:
-                st.write(f"{t['name']} (P{t['priority']})")
+                status = "Done" if t["completed"] else "Not Done"
+                st.write(f"**{t['name']}** (P{t['priority']}) — {status}")
             with col2:
                 if st.button("Done", key=f"done_{i}"):
                     t["completed"] = True
                     save_user_data(user, data)
+                    st.rerun()
             with col3:
                 if st.button("Not Done", key=f"undo_{i}"):
                     t["completed"] = False
                     save_user_data(user, data)
+                    st.rerun()
 
-# === TAB 2: DAILY SCHEDULE ===
+# === TAB 2: DAILY SCHEDULE (NOW SAFE) ===
 with tab2:
     st.header("Your Daily Schedule")
     current_hour = datetime.datetime.now().strftime("%I:%M %p")
@@ -145,7 +153,7 @@ with tab2:
     for hour in hours:
         tasks = data["daily_schedule"].get(hour, [])
         done = all(any(tt["name"] == task and tt["completed"] for tt in data["tasks"]) for task in tasks)
-        status = "Done" if done else "Pending" if tasks else "—"
+        status = "Done" if done and tasks else "Pending" if tasks else "—"
         schedule_data.append({"Time": hour, "Tasks": ", ".join(tasks) if tasks else "—", "Status": status})
 
     df = pd.DataFrame(schedule_data)
@@ -157,7 +165,7 @@ with tab2:
     st.progress(done / total if total else 0)
     st.metric("Tasks Completed", f"{done}/{total}")
 
-# === TAB 3: HOURLY CHECK-IN ===
+# === TAB 3: CHECK-IN ===
 with tab3:
     st.header("Hourly Check-In")
     selected_hour = st.selectbox("Check-in for", hours)
@@ -184,4 +192,5 @@ with tab4:
             save_user_data(user, data)
             st.success("Saved!")
 
+# Final save
 save_user_data(user, data)
