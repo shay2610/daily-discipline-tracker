@@ -11,7 +11,7 @@ DATA_FILES = {
     "Sherwin": "sherwin_data.json"
 }
 
-# === MOTIVATIONAL QUOTES (Rotates Every Hour) ===
+# === MOTIVATIONAL QUOTES ===
 QUOTES = [
     {"quote": "We are what we repeatedly do. Excellence, then, is not an act, but a habit.", "author": "Aristotle"},
     {"quote": "Discipline is the bridge between goals and accomplishment.", "author": "Jim Rohn"},
@@ -42,7 +42,7 @@ def load_user_data(username: str) -> Dict[str, Any]:
             "gratitude": [],
             "streaks": {"habits": 0, "tasks": 0},
             "quote_index": 0,
-            "daily_schedule": {}  # hour: [task names]
+            "daily_schedule": {}
         }
 
 def save_user_data(username: str, data: Dict[str, Any]):
@@ -66,12 +66,17 @@ if data["current_day"] != current_day:
     data["daily_schedule"] = {}
     save_user_data(user, data)
 
-# === HOURS: 6:00 AM – 11:00 PM ===
-hours = [f"{h:02d}:00 {'AM' if h < 12 else 'PM'}" for h in range(6, 24)]
-if h == 12: hours[h-6] = "12:00 PM"
-if h == 0: hours[h-6] = "12:00 AM"
+# === FIXED: 6:00 AM – 11:00 PM HOURS ===
+hours = []
+for h in range(6, 24):
+    if h == 12:
+        hours.append("12:00 PM")
+    elif h > 12:
+        hours.append(f"{h-12:02d}:00 PM")
+    else:
+        hours.append(f"{h:02d}:00 AM")
 
-# Auto-schedule tasks if not done
+# Auto-schedule tasks
 if data["tasks"] and not data["daily_schedule"]:
     priority_tasks = sorted(data["tasks"], key=lambda t: t.get("priority", 3))
     for i, task in enumerate(priority_tasks):
@@ -80,6 +85,7 @@ if data["tasks"] and not data["daily_schedule"]:
             if hour not in data["daily_schedule"]:
                 data["daily_schedule"][hour] = []
             data["daily_schedule"][hour].append(task["name"])
+    save_user_data(user, data)
 
 # === TABS ===
 tab1, tab2, tab3, tab4 = st.tabs(["Setup", "Daily Schedule", "Check-In", "End of Day"])
@@ -89,9 +95,9 @@ with tab1:
     st.header("Setup")
     col1, col2 = st.columns(2)
     with col1:
-        data["wake_up"] = st.selectbox("Wake Up", hours, index=hours.index("6:00 AM"))
+        data["wake_up"] = st.selectbox("Wake Up", hours, index=0)
     with col2:
-        data["bed_time"] = st.selectbox("Bed Time", hours, index=hours.index("11:00 PM"))
+        data["bed_time"] = st.selectbox("Bed Time", hours, index=len(hours)-1)
 
     st.subheader("Habits")
     habit_input = st.text_area("Add habits (one per line)", "\n".join(data["habits"]))
@@ -115,41 +121,41 @@ with tab1:
             with col1:
                 st.write(f"{t['name']} (P{t['priority']})")
             with col2:
-                if st.button("✓", key=f"done_{i}"):
+                if st.button("Done", key=f"done_{i}"):
                     t["completed"] = True
                     save_user_data(user, data)
             with col3:
-                if st.button("✗", key=f"undo_{i}"):
+                if st.button("Not Done", key=f"undo_{i}"):
                     t["completed"] = False
                     save_user_data(user, data)
 
-# === TAB 2: DAILY SCHEDULE (6 AM – 11 PM) ===
+# === TAB 2: DAILY SCHEDULE ===
 with tab2:
     st.header("Your Daily Schedule")
     current_hour = datetime.datetime.now().strftime("%I:%M %p")
     st.info(f"**Current Time: {current_hour}**")
 
-    # Rotate quote hourly
+    # Hourly Quote
     hour_index = datetime.datetime.now().hour
-    quote = QUOTES[data["quote_index"] % len(QUOTES)]
-    data["quote_index"] = (data["quote_index"] + 1) % len(QUOTES)
+    quote = QUOTES[hour_index % len(QUOTES)]
     st.success(f"**Quote of the Hour:**\n> “{quote['quote']}” — *{quote['author']}*")
 
-    # Schedule table
+    # Schedule Table
     schedule_data = []
     for hour in hours:
         tasks = data["daily_schedule"].get(hour, [])
-        status = "✅" if all(t in [tt["name"] for tt in data["tasks"] if tt["completed"]] for t in tasks) else "⏳"
+        done = all(any(tt["name"] == task and tt["completed"] for tt in data["tasks"]) for task in tasks)
+        status = "Done" if done else "Pending" if tasks else "—"
         schedule_data.append({"Time": hour, "Tasks": ", ".join(tasks) if tasks else "—", "Status": status})
 
     df = pd.DataFrame(schedule_data)
     st.dataframe(df, use_container_width=True)
 
     # Progress
-    total_tasks = len(data["tasks"])
-    done_tasks = sum(1 for t in data["tasks"] if t["completed"])
-    st.progress(done_tasks / total_tasks if total_tasks else 0)
-    st.metric("Tasks Completed", f"{done_tasks}/{total_tasks}")
+    total = len(data["tasks"])
+    done = sum(1 for t in data["tasks"] if t["completed"])
+    st.progress(done / total if total else 0)
+    st.metric("Tasks Completed", f"{done}/{total}")
 
 # === TAB 3: HOURLY CHECK-IN ===
 with tab3:
@@ -158,7 +164,7 @@ with tab3:
     for habit in data["habits"]:
         st.checkbox(habit, key=f"check_{habit}_{selected_hour}")
     if st.button("Log Check-In"):
-        data["checkins"][selected_hour] = {"time": datetime.datetime.now().isoformat(), "habits": data["habits"]}
+        data["checkins"][selected_hour] = {"time": datetime.datetime.now().isoformat()}
         save_user_data(user, data)
         st.balloons()
 
